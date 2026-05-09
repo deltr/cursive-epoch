@@ -170,16 +170,62 @@ function Config.Build()
 
     local dispelHeader = panel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     dispelHeader:SetPoint("TOPLEFT", 16, -504)
-    dispelHeader:SetText("Dispel:")
+    dispelHeader:SetText("Dispel: toggle each type to watch and dispel; defaults are auto-set from your class.")
 
-    table.insert(widgets, makeEditBox(panel, "Dispel spell name:", 16, -524, 250, "dispelSpell",
-        function(v) if addon.Dispel then addon.Dispel.UpdateSpell(v) end end))
+    local watchOnChange = function()
+        if addon.Detector and addon.Detector.RescanAll then
+            addon.Detector.RescanAll()
+        end
+    end
+    local spellOnChange = function(dtype, v)
+        if addon.Dispel and addon.Dispel.UpdateSpell then
+            addon.Dispel.UpdateSpell(dtype, v)
+        end
+    end
+
+    for i, dtype in ipairs(addon.DEBUFF_TYPES) do
+        local rowY = -528 - (i - 1) * 28
+
+        local cb = CreateFrame("CheckButton", "CursiveTypeCheck_" .. dtype, panel, "UICheckButtonTemplate")
+        cb:SetPoint("TOPLEFT", 16, rowY)
+        _G[cb:GetName() .. "Text"]:SetText(dtype)
+        cb:SetScript("OnClick", function(self)
+            addon.db.watchedTypes[dtype] = self:GetChecked() and true or false
+            watchOnChange()
+        end)
+        cb.refresh = function()
+            cb:SetChecked(addon.db.watchedTypes and addon.db.watchedTypes[dtype])
+        end
+        table.insert(widgets, cb)
+
+        local eb = CreateFrame("EditBox", "CursiveSpellEdit_" .. dtype, panel, "InputBoxTemplate")
+        eb:SetPoint("TOPLEFT", 130, rowY - 4)
+        eb:SetWidth(260)
+        eb:SetHeight(20)
+        eb:SetAutoFocus(false)
+
+        local commit = function(self)
+            addon.db.dispelSpells = addon.db.dispelSpells or {}
+            addon.db.dispelSpells[dtype] = self:GetText() or ""
+            spellOnChange(dtype, addon.db.dispelSpells[dtype])
+        end
+        eb:SetScript("OnEnterPressed", function(self) commit(self); self:ClearFocus() end)
+        eb:SetScript("OnEditFocusLost", commit)
+        eb:SetScript("OnEscapePressed", function(self)
+            self:SetText(addon.db.dispelSpells and addon.db.dispelSpells[dtype] or "")
+            self:ClearFocus()
+        end)
+        eb.refresh = function()
+            eb:SetText(addon.db.dispelSpells and addon.db.dispelSpells[dtype] or "")
+        end
+        table.insert(widgets, eb)
+    end
 
     local dispelHelp = panel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    dispelHelp:SetPoint("TOPLEFT", 16, -570)
+    dispelHelp:SetPoint("TOPLEFT", 16, -650)
     dispelHelp:SetWidth(500)
     dispelHelp:SetJustifyH("LEFT")
-    dispelHelp:SetText("REQUIRED: macro must contain |cffffffff/click CursiveDispelButton|r (NOT |cffaaaaaa/cdispel|r). Bind that macro to a key. Each press casts the spell above on the longest-cursed group member, skipping dead/offline. /cdispel is blocked in combat by Blizzard's addon protection; /click is not.")
+    dispelHelp:SetText("REQUIRED: macro must contain |cffffffff/click CursiveDispelButton|r (NOT |cffaaaaaa/cdispel|r). Bind that macro to a key. Each press casts the configured spell for the front-of-queue target's debuff type, skipping types that have no spell set. /cdispel is blocked in combat by Blizzard's addon protection; /click is not.")
 
     panel.refresh = function()
         for _, w in ipairs(widgets) do
@@ -190,12 +236,19 @@ function Config.Build()
     panel.okay = function() end
     panel.cancel = function() end
     panel.default = function()
-        for k, v in pairs(addon.defaults) do
-            addon.db[k] = v
+        -- Wipe and rebuild via the same path used at PLAYER_LOGIN, so the
+        -- reset is class-aware (matches what a fresh install would get).
+        for k in pairs(addon.db) do
+            addon.db[k] = nil
         end
+        addon.SetupDB()
         panel.refresh()
         addon.Alert.RefreshFont()
         addon.Detector.RebuildWatchList()
+        addon.Detector.RescanAll()
+        if addon.Dispel and addon.Dispel.UpdateSpells then
+            addon.Dispel.UpdateSpells(addon.db.dispelSpells)
+        end
     end
 
     InterfaceOptions_AddCategory(panel)

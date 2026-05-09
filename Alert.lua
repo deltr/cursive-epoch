@@ -110,16 +110,17 @@ function Alert.ShowBanner(text)
     end
 end
 
-function Alert.FormatTemplate(template, target, spell, caster)
+function Alert.FormatTemplate(template, target, spell, caster, dtype)
     if not template or template == "" then return "" end
     return (string.gsub(template, "%%(%w+)%%", {
         target = target or "",
         spell = spell or "",
         caster = caster or "",
+        type = dtype or "",
     }))
 end
 
-function Alert.Fire(unit, spellName, casterName)
+function Alert.Fire(unit, spellName, casterName, dtype)
     local db = addon.db
     if not db then return end
     local targetName = UnitName(unit) or unit or "?"
@@ -129,7 +130,7 @@ function Alert.Fire(unit, spellName, casterName)
     else
         template = db.groupTemplate
     end
-    local text = Alert.FormatTemplate(template, targetName, spellName, casterName)
+    local text = Alert.FormatTemplate(template, targetName, spellName, casterName, dtype)
     Alert.PlayByKey(db.sound)
     Alert.ShowBanner(text)
 end
@@ -137,6 +138,6 @@ end
 function Alert.TestPopup()
     if not addon.db then return end
     Alert.PlayByKey(addon.db.sound)
-    local sample = Alert.FormatTemplate(addon.db.groupTemplate, "Bob", "Curse of Agony", "Skeletal Mage")
+    local sample = Alert.FormatTemplate(addon.db.groupTemplate, "Bob", "Curse of Agony", "Skeletal Mage", "Curse")
     Alert.ShowBanner(sample)
 end

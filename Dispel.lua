@@ -11,26 +11,35 @@ local function chat(msg)
     end
 end
 
--- Single-button pattern using SecureHandlerWrapScript: a pre-snippet runs in
--- secure context before SecureActionButton's cast handler, sets the unit and
--- spell attributes from our published queue, then the unmodified cast handler
--- fires using those attributes. Avoids the inner-button hop that loses the
--- hardware-event flag in 3.3.5a.
+-- The pre-snippet runs in secure context before SecureActionButton's cast
+-- handler. It walks the published queue (a comma-separated list of
+-- "unit:type" pairs in priority order), finds the first entry whose type
+-- has a non-empty configured spell, and writes type/spell/unit attributes
+-- on self. The cast handler then fires using those attributes. Since this
+-- all happens inside secure context, attribute writes are allowed in combat.
 local PRE_SNIPPET = [[
     local q = self:GetAttribute("cursive-queue") or ""
-    local s = self:GetAttribute("cursive-spell") or ""
-    if q == "" or s == "" then
+    if q == "" then
         self:SetAttribute("type", nil)
         return
     end
-    local unit = strsplit(",", q)
-    if not unit or unit == "" then
-        self:SetAttribute("type", nil)
-        return
+    local entries = { strsplit(",", q) }
+    for i = 1, #entries do
+        local entry = entries[i]
+        if entry and entry ~= "" then
+            local unit, dtype = strsplit(":", entry)
+            if unit and unit ~= "" and dtype and dtype ~= "" then
+                local spell = self:GetAttribute("cursive-spell-" .. dtype) or ""
+                if spell ~= "" then
+                    self:SetAttribute("type", "spell")
+                    self:SetAttribute("spell", spell)
+                    self:SetAttribute("unit", unit)
+                    return
+                end
+            end
+        end
     end
-    self:SetAttribute("type", "spell")
-    self:SetAttribute("spell", s)
-    self:SetAttribute("unit", unit)
+    self:SetAttribute("type", nil)
 ]]
 
 function Dispel.Init()
@@ -51,23 +60,34 @@ function Dispel.Init()
     SecureHandlerWrapScript(btn, "OnClick", btn, PRE_SNIPPET)
 
     if addon.db then
-        Dispel.UpdateSpell(addon.db.dispelSpell)
+        Dispel.UpdateSpells(addon.db.dispelSpells)
     end
     Dispel.UpdateQueue({})
 end
 
-function Dispel.UpdateQueue(units)
+-- Custom (non-protected) attribute -- safe to set in combat.
+function Dispel.UpdateQueue(pairs_list)
     if not btn then return end
     local s = ""
-    if units and #units > 0 then
-        s = table.concat(units, ",")
+    if pairs_list and #pairs_list > 0 then
+        s = table.concat(pairs_list, ",")
     end
     btn:SetAttribute("cursive-queue", s)
 end
 
-function Dispel.UpdateSpell(spell)
+function Dispel.UpdateSpells(spells)
     if not btn then return end
-    btn:SetAttribute("cursive-spell", spell or "")
+    spells = spells or {}
+    for _, dtype in ipairs(addon.DEBUFF_TYPES) do
+        btn:SetAttribute("cursive-spell-" .. dtype, spells[dtype] or "")
+    end
+end
+
+-- Convenience: update one type's spell without rewriting all four. Called
+-- from the per-type editbox onChange.
+function Dispel.UpdateSpell(dtype, spell)
+    if not btn or not dtype then return end
+    btn:SetAttribute("cursive-spell-" .. dtype, spell or "")
 end
 
 function Dispel.CastNext()
@@ -76,12 +96,12 @@ function Dispel.CastNext()
         return
     end
     local q = btn:GetAttribute("cursive-queue") or ""
-    local s = btn:GetAttribute("cursive-spell") or ""
     if q == "" then
-        chat("queue empty (no cursed targets seen).")
+        chat("queue empty (no targets).")
         return
     end
-    chat("dispelling " .. q:match("^[^,]+") .. " with [" .. s .. "]")
+    local first = strsplit(",", q)
+    chat("dispatching " .. first .. " (note: /cdispel is blocked in combat; bind a macro with /click CursiveDispelButton instead).")
     btn:Click()
 end
 
@@ -93,18 +113,24 @@ function Dispel.PrintState()
         .. " watchSelf=" .. tostring(db and db.watchSelf)
         .. " watchGroup=" .. tostring(db and db.watchGroup))
 
+    if db and db.watchedTypes then
+        local watched = {}
+        for _, t in ipairs(addon.DEBUFF_TYPES) do
+            if db.watchedTypes[t] then table.insert(watched, t) end
+        end
+        chat("watched types: " .. table.concat(watched, ", "))
+    end
+
     local q = btn:GetAttribute("cursive-queue") or "(none)"
-    local s = btn:GetAttribute("cursive-spell") or "(none)"
-    chat("published queue=[" .. q .. "] spell=[" .. s .. "]")
+    chat("published queue=[" .. q .. "]")
+    for _, t in ipairs(addon.DEBUFF_TYPES) do
+        local s = btn:GetAttribute("cursive-spell-" .. t) or ""
+        chat("  spell-" .. t .. "=[" .. s .. "]")
+    end
 
     if addon.Detector then
         local raw = table.concat(addon.Detector.curseQueue or {}, ", ")
         chat("raw queue: [" .. raw .. "]")
-        local watched = {}
-        for unit in pairs(addon.Detector.watched or {}) do
-            table.insert(watched, unit)
-        end
-        chat("watched units: " .. table.concat(watched, ", "))
     end
 
     chat("--- player debuffs (name | debuffType) ---")
