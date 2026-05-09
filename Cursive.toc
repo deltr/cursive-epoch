@@ -1,0 +1,11 @@
+## Interface: 30300
+## Title: Cursive
+## Notes: Plays a sound and shows a banner when you or a group member is cursed.
+## Version: 1.0
+## SavedVariables: CursiveDB
+
+Core.lua
+Alert.lua
+Detector.lua
+Dispel.lua
+Config.lua
